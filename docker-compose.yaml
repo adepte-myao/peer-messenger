@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+
+  service:
+    container_name: temp_service
+    build:
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
