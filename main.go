@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,10 @@ func main() {
 
 	engine.Use(func(c *gin.Context) {
 		logger.Info("Request received: ", c.Request.URL.Path)
+	})
+
+	engine.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, map[string]string{"info": "pong"})
 	})
 
 	engine.POST("/register", handler.Register)
