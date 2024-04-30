@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"log"
 	"net/http"
 
@@ -36,7 +38,18 @@ func main() {
 	engine.Use(cors.New(corsConfig))
 
 	engine.Use(func(c *gin.Context) {
-		logger.Info("Request received: ", c.Request.URL.Path)
+		reqBodyCopy := &bytes.Buffer{}
+		_, err = io.Copy(reqBodyCopy, c.Request.Body)
+		if err != nil {
+			logger.Error("can't copy request body")
+			c.Abort()
+		}
+
+		c.Request.Body = io.NopCloser(reqBodyCopy)
+		logger.Info("Request received: ", c.Request.URL.Path, ", body: ", reqBodyCopy.String())
+
+		c.Next()
+		logger.Info("Request processed: ", c.Request.URL.Path)
 	})
 
 	engine.GET("/ping", func(c *gin.Context) {
@@ -46,7 +59,9 @@ func main() {
 	engine.POST("/register", handler.Register)
 	engine.POST("/login", handler.Login)
 	engine.POST("/channel/join", handler.JoinChannel)
+	engine.POST("channel/leave", handler.LeaveChannel)
 	engine.GET("/channel/subscribe", handler.Subscribe)
+	engine.POST("/channel/collect", handler.CollectMessages)
 	engine.POST("/peer/send", handler.SendToPeer)
 
 	err = engine.Run(":8080")

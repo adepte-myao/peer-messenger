@@ -13,7 +13,7 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
-type JoinChannelRequest struct {
+type ChannelRequest struct {
 	ChannelName string `json:"channelName" validate:"required"`
 }
 

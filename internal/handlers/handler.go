@@ -24,6 +24,7 @@ type channelKey struct {
 type channel map[string]chan models.ChannelEntity
 
 func (ch *channel) Publish(entity models.ChannelEntity) {
+	fmt.Printf("gonna send to %d users\n", len(*ch))
 	for _, toChannel := range *ch {
 		toChannel <- entity
 	}
@@ -125,7 +126,7 @@ func (handler *PeerMessenger) JoinChannel(c *gin.Context) {
 		return
 	}
 
-	var dto models.JoinChannelRequest
+	var dto models.ChannelRequest
 	err := json.NewDecoder(c.Request.Body).Decode(&dto)
 	if err != nil {
 		handler.logger.Error(err)
@@ -167,6 +168,64 @@ func (handler *PeerMessenger) JoinChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]string{"subscriptionID": subscriptionID})
 }
 
+func (handler *PeerMessenger) LeaveChannel(c *gin.Context) {
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		err := errors.New("header Authorization is empty")
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	lastIndex := len(token) - len(handler.salt)
+	userID := token[:lastIndex]
+
+	if _, ok := handler.users[userID]; !ok {
+		err := errors.New("user does not exist")
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	var dto models.ChannelRequest
+	err := json.NewDecoder(c.Request.Body).Decode(&dto)
+	if err != nil {
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	err = handler.validate.Struct(dto)
+	if err != nil {
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	handler.channelGroupMutex.Lock()
+	defer handler.channelGroupMutex.Unlock()
+
+	groupKey := channelKey{ChannelName: dto.ChannelName}
+	channelGroup, ok := handler.channelGroups[groupKey]
+	if !ok {
+		err = errors.New("no channel to leave")
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	channelGroup.Publish(models.ChannelEntity{
+		Time:       time.Now(),
+		ActionType: models.UserLeft,
+		UserID:     userID,
+		Data:       nil,
+	})
+
+	delete(channelGroup, userID)
+
+	c.JSON(http.StatusOK, map[string]string{"status": "OK"})
+}
+
 func (handler *PeerMessenger) Subscribe(c *gin.Context) {
 	subscriptionID, ok := c.GetQuery("subscriptionID")
 	if !ok || subscriptionID == "" {
@@ -201,10 +260,50 @@ func (handler *PeerMessenger) Subscribe(c *gin.Context) {
 
 	for entity := range userChan {
 		c.SSEvent("message", entity)
-		c.Writer.Flush() // Fuck this, honestly. Why wasn't it in THE GIN Framework????
+		c.Writer.Flush() // Why wasn't it in THE GIN Framework????
 	}
 
+	fmt.Printf("leaving from %s group\n", groupKey)
+
 	c.AbortWithStatus(http.StatusNoContent)
+}
+
+func (handler *PeerMessenger) CollectMessages(c *gin.Context) {
+	subscriptionID, ok := c.GetQuery("subscriptionID")
+	if !ok || subscriptionID == "" {
+		err := errors.New("subscriptionID is not provided")
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	keys := handler.keysExtractor.FindAllString(subscriptionID, 2)
+
+	handler.channelGroupMutex.RLock()
+
+	groupKey := channelKey{ChannelName: keys[0]}
+	channelGroup, ok := handler.channelGroups[groupKey]
+	if !ok {
+		err := errors.New("channel does not exist")
+		handler.logger.Error(err)
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+
+		handler.channelGroupMutex.RUnlock()
+		return
+	}
+
+	userChan := channelGroup[keys[1]]
+
+	handler.channelGroupMutex.RUnlock()
+
+	entities := make([]models.ChannelEntity, 0, len(userChan))
+	for len(userChan) > 0 {
+		entity := <-userChan
+
+		entities = append(entities, entity)
+	}
+
+	c.JSON(http.StatusOK, map[string][]models.ChannelEntity{"entities": entities})
 }
 
 func (handler *PeerMessenger) SendToPeer(c *gin.Context) {
