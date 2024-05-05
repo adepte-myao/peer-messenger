@@ -251,7 +251,7 @@ func (handler *PeerMessenger) SendToPeer(c *gin.Context) {
 		return
 	}
 
-	err = room.SendToUser(c.Request.Context(), dto.DestinationUserID, dto.Message)
+	err = room.SendToUser(c.Request.Context(), userID, dto.DestinationUserID, dto.Message)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return

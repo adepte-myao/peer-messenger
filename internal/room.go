@@ -18,32 +18,38 @@ var (
 )
 
 const (
-	channelThreshold = 40
-	maxMsgRPS        = 100
+	msgCountThreshold     = 40
+	maxMsgRPS             = 100
+	maxInactivityDuration = 5 * time.Minute
 )
 
 type Room struct {
-	userMessages map[string]chan models.ChannelEntity
-	mux          *sync.RWMutex
-	log          *zap.Logger
-	sendLimiter  *rate.Limiter
+	userInfos   map[string]*userInfo
+	mux         *sync.RWMutex
+	log         *zap.Logger
+	sendLimiter *rate.Limiter
+}
+
+type userInfo struct {
+	entities       chan models.ChannelEntity
+	lastActionTime time.Time
 }
 
 func NewRoom(log *zap.Logger) *Room {
 	return &Room{
-		userMessages: make(map[string]chan models.ChannelEntity),
-		mux:          &sync.RWMutex{},
-		log:          log,
-		sendLimiter:  rate.NewLimiter(rate.Limit(maxMsgRPS), 2*maxMsgRPS),
+		userInfos:   make(map[string]*userInfo),
+		mux:         &sync.RWMutex{},
+		log:         log,
+		sendLimiter: rate.NewLimiter(rate.Limit(maxMsgRPS), 2*maxMsgRPS),
 	}
 }
 
 func (r *Room) publish(entity models.ChannelEntity) {
-	r.log.Info("gonna send to message to users", zap.Int("users number", len(r.userMessages)-1))
+	r.log.Info("gonna send to message to users", zap.Int("users number", len(r.userInfos)-1))
 
-	for userID, toChannel := range r.userMessages {
+	for userID, info := range r.userInfos {
 		if userID != entity.UserID {
-			toChannel <- entity
+			info.entities <- entity
 		}
 	}
 }
@@ -52,11 +58,14 @@ func (r *Room) AddUser(userID string) error {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	if _, ok := r.userMessages[userID]; ok {
+	if _, ok := r.userInfos[userID]; ok {
 		return ErrUserAlreadyInRoom
 	}
 
-	r.userMessages[userID] = make(chan models.ChannelEntity, 100)
+	r.userInfos[userID] = &userInfo{
+		entities:       make(chan models.ChannelEntity, 100),
+		lastActionTime: time.Now(),
+	}
 
 	r.publish(models.ChannelEntity{
 		Time:       time.Now(),
@@ -72,13 +81,13 @@ func (r *Room) RemoveUser(userID string) error {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	if _, ok := r.userMessages[userID]; !ok {
+	if _, ok := r.userInfos[userID]; !ok {
 		return ErrUserNotInRoom
 	}
 
-	ch := r.userMessages[userID]
-	delete(r.userMessages, userID)
-	close(ch)
+	info := r.userInfos[userID]
+	delete(r.userInfos, userID)
+	close(info.entities)
 
 	r.publish(models.ChannelEntity{
 		Time:       time.Now(),
@@ -94,22 +103,26 @@ func (r *Room) GetUserEventsChan(userID string) (<-chan models.ChannelEntity, er
 	r.mux.RLock()
 	defer r.mux.RUnlock()
 
-	userCh, ok := r.userMessages[userID]
+	info, ok := r.userInfos[userID]
 	if !ok {
 		return nil, ErrUserNotInRoom
 	}
 
-	return userCh, nil
+	info.lastActionTime = time.Now()
+
+	return info.entities, nil
 }
 
 func (r *Room) GetUserEventsSlice(userID string) ([]models.ChannelEntity, error) {
 	r.mux.RLock()
 	defer r.mux.RUnlock()
 
-	userCh, ok := r.userMessages[userID]
+	info, ok := r.userInfos[userID]
 	if !ok {
 		return nil, ErrUserNotInRoom
 	}
+
+	userCh := info.entities
 
 	entities := make([]models.ChannelEntity, 0, 2*len(userCh))
 	for len(userCh) > 0 {
@@ -121,10 +134,12 @@ func (r *Room) GetUserEventsSlice(userID string) ([]models.ChannelEntity, error)
 		entities = append(entities, entity)
 	}
 
+	info.lastActionTime = time.Now()
+
 	return entities, nil
 }
 
-func (r *Room) SendToUser(ctx context.Context, destUserID string, data map[string]any) error {
+func (r *Room) SendToUser(ctx context.Context, srcUserID, destUserID string, data map[string]any) error {
 	err := r.sendLimiter.Wait(ctx)
 	if err != nil {
 		r.log.Warn("send limiter cancelled", zap.String("reason", err.Error()))
@@ -134,12 +149,19 @@ func (r *Room) SendToUser(ctx context.Context, destUserID string, data map[strin
 	r.mux.RLock()
 	defer r.mux.RUnlock()
 
-	ch, ok := r.userMessages[destUserID]
+	srcInfo, ok := r.userInfos[srcUserID]
 	if !ok {
 		return ErrUserNotInRoom
 	}
 
-	ch <- models.ChannelEntity{
+	srcInfo.lastActionTime = time.Now()
+
+	destInfo, ok := r.userInfos[destUserID]
+	if !ok {
+		return ErrUserNotInRoom
+	}
+
+	destInfo.entities <- models.ChannelEntity{
 		Time:       time.Now(),
 		ActionType: models.Message,
 		UserID:     destUserID,
@@ -155,13 +177,25 @@ func (r *Room) RemoveDisconnected() {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	clearedCnt := 0
-	for _, ch := range r.userMessages {
-		if len(ch) > channelThreshold {
-			clearedCnt++
-			close(ch)
+	toDelete := make([]string, 0)
+	for userID, info := range r.userInfos {
+		if len(info.entities) > msgCountThreshold || time.Since(info.lastActionTime) > maxInactivityDuration {
+			toDelete = append(toDelete, userID)
 		}
 	}
 
-	r.log.Info("cleared room", zap.Int("cleared number", clearedCnt))
+	for _, userID := range toDelete {
+		info := r.userInfos[userID]
+		delete(r.userInfos, userID)
+		close(info.entities)
+
+		r.publish(models.ChannelEntity{
+			Time:       time.Now(),
+			ActionType: models.UserLeft,
+			UserID:     userID,
+			Data:       nil,
+		})
+	}
+
+	r.log.Info("cleared room", zap.Int("cleared number", len(toDelete)), zap.Any("deleted", toDelete))
 }
