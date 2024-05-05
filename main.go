@@ -9,13 +9,14 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"peer-messenger/internal/handlers"
-	"peer-messenger/internal/loggers"
 )
 
 func main() {
-	logger, err := loggers.NewZap()
+	logger, err := NewZap()
 	if err != nil {
 		log.Panic(err)
 	}
@@ -27,8 +28,9 @@ func main() {
 	engine := gin.New()
 
 	engine.Use(func(c *gin.Context) {
+		c.Next()
 		for _, err := range c.Errors {
-			logger.Error(err.Error())
+			logger.Error("got post process error", zap.Error(err))
 		}
 	})
 
@@ -41,15 +43,16 @@ func main() {
 		reqBodyCopy := &bytes.Buffer{}
 		_, err = io.Copy(reqBodyCopy, c.Request.Body)
 		if err != nil {
-			logger.Error("can't copy request body")
+			logger.Error("can't copy request body", zap.Error(err))
 			c.Abort()
+			return
 		}
 
 		c.Request.Body = io.NopCloser(reqBodyCopy)
-		logger.Info("Request received: ", c.Request.URL.Path, ", body: ", reqBodyCopy.String())
+		logger.Info("Request received", zap.String("path", c.Request.URL.Path), zap.String("body", reqBodyCopy.String()))
 
 		c.Next()
-		logger.Info("Request processed: ", c.Request.URL.Path)
+		logger.Info("Request processed", zap.String("path", c.Request.URL.Path))
 	})
 
 	engine.GET("/ping", func(c *gin.Context) {
@@ -66,6 +69,25 @@ func main() {
 
 	err = engine.Run(":8080")
 	if err != nil {
-		logger.Error(err)
+		logger.Error("cannot start gin engine", zap.Error(err))
 	}
+}
+
+func NewZap() (*zap.Logger, error) {
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	logConfig := zap.NewProductionConfig()
+	logConfig.EncoderConfig = encoderConfig
+	logConfig.DisableStacktrace = true
+
+	level := zapcore.DebugLevel
+	logConfig.Level.SetLevel(level)
+
+	coreLogger, err := logConfig.Build()
+	if err != nil {
+		return nil, err
+	}
+
+	return coreLogger, nil
 }
