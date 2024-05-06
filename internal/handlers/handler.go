@@ -45,6 +45,9 @@ func NewPeerMessenger(logger *zap.Logger, validate *validator.Validate) *PeerMes
 		for {
 			time.Sleep(10 * time.Second)
 			out.roomRepo.Clean()
+
+			state := out.roomRepo.GetState()
+			logger.Debug("rooms state collected", zap.Any("state", state))
 		}
 	})
 
@@ -256,6 +259,19 @@ func (handler *PeerMessenger) SendToPeer(c *gin.Context) {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return
 	}
+
+	c.AbortWithStatus(http.StatusOK)
+}
+
+func (handler *PeerMessenger) RemoveRoom(c *gin.Context) {
+	dto, err := getTypedRequestBody[models.ChannelRequest](c.Request.Body, handler.validate)
+	if err != nil {
+		handler.logger.Error(err.Error())
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	handler.roomRepo.RemoveRoom(dto.ChannelName)
 
 	c.AbortWithStatus(http.StatusOK)
 }

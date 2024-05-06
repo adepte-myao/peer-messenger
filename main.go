@@ -66,6 +66,7 @@ func main() {
 	engine.GET("/channel/subscribe", handler.Subscribe)
 	engine.POST("/channel/collect", handler.CollectMessages)
 	engine.POST("/peer/send", handler.SendToPeer)
+	engine.DELETE("/room/delete", handler.RemoveRoom)
 
 	err = engine.Run(":8080")
 	if err != nil {

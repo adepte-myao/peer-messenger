@@ -20,7 +20,7 @@ var (
 const (
 	msgCountThreshold     = 40
 	maxMsgRPS             = 100
-	maxInactivityDuration = time.Minute
+	maxInactivityDuration = 5 * time.Minute
 )
 
 type Room struct {
@@ -62,17 +62,17 @@ func (r *Room) AddUser(userID string) error {
 		return ErrUserAlreadyInRoom
 	}
 
-	r.userInfos[userID] = &userInfo{
-		entities:       make(chan models.ChannelEntity, 100),
-		lastActionTime: time.Now(),
-	}
-
 	r.publish(models.ChannelEntity{
 		Time:       time.Now(),
 		ActionType: models.UserJoined,
 		UserID:     userID,
 		Data:       nil,
 	})
+
+	r.userInfos[userID] = &userInfo{
+		entities:       make(chan models.ChannelEntity, 100),
+		lastActionTime: time.Now(),
+	}
 
 	return nil
 }
@@ -164,7 +164,7 @@ func (r *Room) SendToUser(ctx context.Context, srcUserID, destUserID string, dat
 	destInfo.entities <- models.ChannelEntity{
 		Time:       time.Now(),
 		ActionType: models.Message,
-		UserID:     destUserID,
+		UserID:     srcUserID,
 		Data:       data,
 	}
 
@@ -202,4 +202,29 @@ func (r *Room) RemoveDisconnected() {
 
 func (r *Room) IsEmpty() bool {
 	return len(r.userInfos) == 0
+}
+
+func (r *Room) GetState() []UserInfo {
+	r.mux.RLock()
+	defer r.mux.RUnlock()
+
+	infos := make([]UserInfo, 0, len(r.userInfos))
+	for userID, user := range r.userInfos {
+		infos = append(infos, UserInfo{
+			UserID:                      userID,
+			SecondsSinceLastInteraction: time.Since(user.lastActionTime).Seconds(),
+		})
+	}
+
+	return infos
+}
+
+func (r *Room) Dispose() {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	for userID, info := range r.userInfos {
+		close(info.entities)
+		delete(r.userInfos, userID)
+	}
 }

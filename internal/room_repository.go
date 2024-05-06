@@ -87,3 +87,45 @@ func (repo *RoomRepository) AddRoom(roomName string) (*Room, error) {
 
 	return room, nil
 }
+
+func (repo *RoomRepository) RemoveRoom(roomName string) {
+	repo.mut.Lock()
+	defer repo.mut.Unlock()
+
+	room, ok := repo.rooms[roomName]
+	if !ok {
+		return
+	}
+
+	room.Dispose()
+	delete(repo.rooms, roomName)
+}
+
+type RoomInfo struct {
+	Name       string
+	TotalUsers int
+	UsersInfo  []UserInfo
+}
+
+type UserInfo struct {
+	UserID                      string
+	SecondsSinceLastInteraction float64
+}
+
+func (repo *RoomRepository) GetState() []RoomInfo {
+	repo.mut.RLock()
+	defer repo.mut.RUnlock()
+
+	roomsInfo := make([]RoomInfo, 0, len(repo.rooms))
+	for roomID, room := range repo.rooms {
+		usersInfo := room.GetState()
+
+		roomsInfo = append(roomsInfo, RoomInfo{
+			Name:       roomID,
+			TotalUsers: len(usersInfo),
+			UsersInfo:  usersInfo,
+		})
+	}
+
+	return roomsInfo
+}
