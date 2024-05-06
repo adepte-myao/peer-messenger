@@ -26,12 +26,30 @@ func NewRoomRepository(log *zap.Logger) *RoomRepository {
 	}
 }
 
-func (repo *RoomRepository) RemoveDisconnectedUsers() {
+// Clean is a blocking call that makes each room drop disconnected users then removes all empty rooms
+func (repo *RoomRepository) Clean() {
 	repo.mut.Lock()
 	defer repo.mut.Unlock()
 
-	for _, room := range repo.rooms {
+	toRemove := make([]string, 0)
+	for roomID, room := range repo.rooms {
 		room.RemoveDisconnected()
+
+		if room.IsEmpty() {
+			toRemove = append(toRemove, roomID)
+		}
+	}
+
+	for _, roomID := range toRemove {
+		delete(repo.rooms, roomID)
+	}
+
+	if len(toRemove) > 0 {
+		repo.log.Info(
+			"removed some rooms",
+			zap.Int("removed count", len(toRemove)),
+			zap.Any("removed", toRemove),
+		)
 	}
 }
 

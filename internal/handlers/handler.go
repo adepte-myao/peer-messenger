@@ -44,7 +44,7 @@ func NewPeerMessenger(logger *zap.Logger, validate *validator.Validate) *PeerMes
 	g.Go(func() error {
 		for {
 			time.Sleep(10 * time.Second)
-			out.roomRepo.RemoveDisconnectedUsers()
+			out.roomRepo.Clean()
 		}
 	})
 

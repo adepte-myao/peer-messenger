@@ -20,7 +20,7 @@ var (
 const (
 	msgCountThreshold     = 40
 	maxMsgRPS             = 100
-	maxInactivityDuration = 5 * time.Minute
+	maxInactivityDuration = time.Minute
 )
 
 type Room struct {
@@ -198,4 +198,8 @@ func (r *Room) RemoveDisconnected() {
 	}
 
 	r.log.Info("cleared room", zap.Int("cleared number", len(toDelete)), zap.Any("deleted", toDelete))
+}
+
+func (r *Room) IsEmpty() bool {
+	return len(r.userInfos) == 0
 }
