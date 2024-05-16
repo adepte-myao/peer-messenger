@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"peer-messenger/internal/handlers"
+	"peer-messenger/internal/metrics"
 )
 
 func main() {
@@ -23,7 +25,9 @@ func main() {
 
 	validate := validator.New()
 
-	handler := handlers.NewPeerMessenger(logger, validate)
+	prom := metrics.New()
+
+	handler := handlers.NewPeerMessenger(logger, validate, prom)
 
 	engine := gin.New()
 
@@ -38,6 +42,19 @@ func main() {
 	corsConfig.AllowAllOrigins = true
 	corsConfig.AllowHeaders = append(corsConfig.AllowHeaders, "Authorization")
 	engine.Use(cors.New(corsConfig))
+
+	engine.Use(func(c *gin.Context) {
+		startTime := time.Now()
+		defer func() {
+			prom.RequestDuration.WithLabelValues(c.Request.URL.Path).Observe(time.Since(startTime).Seconds())
+		}()
+
+		defer func() {
+			prom.RPS.WithLabelValues(c.Request.URL.Path).Inc()
+		}()
+
+		c.Next()
+	})
 
 	engine.Use(func(c *gin.Context) {
 		reqBodyCopy := &bytes.Buffer{}
@@ -67,6 +84,7 @@ func main() {
 	engine.POST("/channel/collect", handler.CollectMessages)
 	engine.POST("/peer/send", handler.SendToPeer)
 	engine.DELETE("/room/delete", handler.RemoveRoom)
+	engine.POST("/metrics/resolution", handler.CollectResolution)
 
 	err = engine.Run(":8080")
 	if err != nil {

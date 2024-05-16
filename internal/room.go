@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
+	"peer-messenger/internal/metrics"
 	"peer-messenger/internal/models"
 )
 
@@ -24,23 +25,28 @@ const (
 )
 
 type Room struct {
+	name        string
 	userInfos   map[string]*userInfo
 	mux         *sync.RWMutex
 	log         *zap.Logger
 	sendLimiter *rate.Limiter
+	metrics     *metrics.Metrics
 }
 
 type userInfo struct {
 	entities       chan models.ChannelEntity
 	lastActionTime time.Time
+	joinTime       time.Time
 }
 
-func NewRoom(log *zap.Logger) *Room {
+func NewRoom(name string, log *zap.Logger, metrics *metrics.Metrics) *Room {
 	return &Room{
+		name:        name,
 		userInfos:   make(map[string]*userInfo),
 		mux:         &sync.RWMutex{},
 		log:         log,
 		sendLimiter: rate.NewLimiter(rate.Limit(maxMsgRPS), 2*maxMsgRPS),
+		metrics:     metrics,
 	}
 }
 
@@ -72,6 +78,7 @@ func (r *Room) AddUser(userID string) error {
 	r.userInfos[userID] = &userInfo{
 		entities:       make(chan models.ChannelEntity, 100),
 		lastActionTime: time.Now(),
+		joinTime:       time.Now(),
 	}
 
 	return nil
@@ -166,6 +173,10 @@ func (r *Room) SendToUser(ctx context.Context, srcUserID, destUserID string, dat
 		ActionType: models.Message,
 		UserID:     srcUserID,
 		Data:       data,
+	}
+
+	if data["messageType"] == "answer" {
+		r.metrics.WebRTCConnectionCreationTime.WithLabelValues(r.name).Observe(time.Since(srcInfo.joinTime).Seconds())
 	}
 
 	return nil

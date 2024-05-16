@@ -37,3 +37,10 @@ type SendToPeerRequest struct {
 	DestinationUserID string         `json:"destinationUserID"`
 	Message           map[string]any `json:"message"`
 }
+
+type ResolutionRequest struct {
+	RoomName  string  `json:"roomName" validate:"required"`
+	FrameRate float64 `json:"frameRate" validate:"required"`
+	Height    int     `json:"height" validate:"required"`
+	Width     int     `json:"width" validate:"required"`
+}

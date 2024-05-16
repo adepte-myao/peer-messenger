@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+
+	"peer-messenger/internal/metrics"
 )
 
 var (
@@ -13,16 +15,18 @@ var (
 )
 
 type RoomRepository struct {
-	rooms map[string]*Room
-	mut   *sync.RWMutex
-	log   *zap.Logger
+	rooms   map[string]*Room
+	mut     *sync.RWMutex
+	log     *zap.Logger
+	metrics *metrics.Metrics
 }
 
-func NewRoomRepository(log *zap.Logger) *RoomRepository {
+func NewRoomRepository(log *zap.Logger, metrics *metrics.Metrics) *RoomRepository {
 	return &RoomRepository{
-		rooms: make(map[string]*Room),
-		mut:   &sync.RWMutex{},
-		log:   log,
+		rooms:   make(map[string]*Room),
+		mut:     &sync.RWMutex{},
+		log:     log,
+		metrics: metrics,
 	}
 }
 
@@ -82,7 +86,7 @@ func (repo *RoomRepository) AddRoom(roomName string) (*Room, error) {
 	}
 
 	roomLog := repo.log.With(zap.String("room name", roomName))
-	room := NewRoom(roomLog)
+	room := NewRoom(roomName, roomLog, repo.metrics)
 	repo.rooms[roomName] = room
 
 	return room, nil

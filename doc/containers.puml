@@ -1,0 +1,22 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+skinparam wrapWidth 300
+skinparam linetype polyline
+LAYOUT_WITH_LEGEND()
+LAYOUT_LANDSCAPE()
+title
+  <b>Компоненты 2024.05.12</b>
+  <i>Система потоковой передачи</i>
+end title
+
+Container_Ext(client, "Клиент", "", "")
+
+Container_Boundary(service, "Сервис соединений") {
+    Component(handler, "HTTP handler")
+
+}
+
+Rel(client, handler, "", "HTTP")
+
+
+@enduml

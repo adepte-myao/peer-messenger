@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"peer-messenger/internal"
+	"peer-messenger/internal/metrics"
 	"peer-messenger/internal/models"
 )
 
@@ -25,9 +26,10 @@ type PeerMessenger struct {
 	users             map[string]struct{}
 	roomRepo          *internal.RoomRepository
 	roomKeysExtractor *regexp.Regexp
+	metrics           *metrics.Metrics
 }
 
-func NewPeerMessenger(logger *zap.Logger, validate *validator.Validate) *PeerMessenger {
+func NewPeerMessenger(logger *zap.Logger, validate *validator.Validate, metrics *metrics.Metrics) *PeerMessenger {
 	salt := []byte("asasasas")
 
 	out := &PeerMessenger{
@@ -35,8 +37,9 @@ func NewPeerMessenger(logger *zap.Logger, validate *validator.Validate) *PeerMes
 		salt:              salt,
 		validate:          validate,
 		users:             make(map[string]struct{}),
-		roomRepo:          internal.NewRoomRepository(logger),
+		roomRepo:          internal.NewRoomRepository(logger, metrics),
 		roomKeysExtractor: regexp.MustCompile(`[^_]+`),
+		metrics:           metrics,
 	}
 
 	g := new(errgroup.Group)
@@ -299,4 +302,15 @@ func getTypedRequestBody[T any](body io.Reader, validate *validator.Validate) (T
 	}
 
 	return dto, nil
+}
+
+func (handler *PeerMessenger) CollectResolution(c *gin.Context) {
+	dto, err := getTypedRequestBody[models.ResolutionRequest](c.Request.Body, handler.validate)
+	if err != nil {
+		handler.logger.Error(err.Error())
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	handler.metrics.StreamResolution.WithLabelValues(dto.RoomName).Set(float64(dto.Height))
 }
