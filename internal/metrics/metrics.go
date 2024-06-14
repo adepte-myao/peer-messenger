@@ -12,6 +12,7 @@ const (
 )
 
 type Metrics struct {
+	Reg                          *prometheus.Registry
 	WebRTCConnectionCreationTime *prometheus.HistogramVec
 	StreamResolution             *prometheus.GaugeVec
 	RPS                          *prometheus.CounterVec
@@ -22,6 +23,7 @@ func New() *Metrics {
 	reg := prometheus.NewRegistry()
 
 	m := &Metrics{
+		Reg: reg,
 		WebRTCConnectionCreationTime: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "webrtc_connection_creation_time",

@@ -1,22 +1,28 @@
 @startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 skinparam wrapWidth 300
 skinparam linetype polyline
-LAYOUT_WITH_LEGEND()
 LAYOUT_LANDSCAPE()
-title
-  <b>Компоненты 2024.05.12</b>
-  <i>Система потоковой передачи</i>
-end title
 
-Container_Ext(client, "Клиент", "", "")
+Person(client, "Пользователь VR")
+Person(operator, "Оператор")
 
-Container_Boundary(service, "Сервис соединений") {
-    Component(handler, "HTTP handler")
-
+System_Boundary(messenger, "Система потоковой передачи медиа-данных") {
+    Container(vr_client, "VR клиент", "Игровой движок", "Компонент для запуска трансляции")
+    Container(browser_client, "Браузерный клиент", "javascript", "Веб-страница для просмотра трансляции")
+    Container(conn_service, "Сервис соединений", "golang", "Сервис для обмена данными, необходимыми для установки соединения")
 }
 
-Rel(client, handler, "", "HTTP")
+System_Ext(monitoring, "Система мониторинга", "")
 
+Rel(client, vr_client, "", "GUI")
+Rel(operator, browser_client, "", "GUI")
+
+Rel(vr_client, conn_service, "", "HTTP")
+Rel(browser_client, conn_service, "", "HTTP")
+
+Rel_U(browser_client, vr_client, "", "WebRTC")
+
+Rel_L(monitoring, conn_service, "", "HTTP")
 
 @enduml

@@ -10,6 +10,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -45,15 +46,11 @@ func main() {
 
 	engine.Use(func(c *gin.Context) {
 		startTime := time.Now()
-		defer func() {
-			prom.RequestDuration.WithLabelValues(c.Request.URL.Path).Observe(time.Since(startTime).Seconds())
-		}()
-
-		defer func() {
-			prom.RPS.WithLabelValues(c.Request.URL.Path).Inc()
-		}()
 
 		c.Next()
+
+		prom.RPS.WithLabelValues(c.Request.URL.Path).Inc()
+		prom.RequestDuration.WithLabelValues(c.Request.URL.Path).Observe(time.Since(startTime).Seconds())
 	})
 
 	engine.Use(func(c *gin.Context) {
@@ -85,6 +82,20 @@ func main() {
 	engine.POST("/peer/send", handler.SendToPeer)
 	engine.DELETE("/room/delete", handler.RemoveRoom)
 	engine.POST("/metrics/resolution", handler.CollectResolution)
+
+	metricsEngine := gin.New()
+	metricsEngine.Any("/metrics", gin.WrapH(
+		promhttp.HandlerFor(prom.Reg, promhttp.HandlerOpts{Registry: prom.Reg})),
+	)
+	metricsEngine.Any("/", gin.WrapH(
+		promhttp.HandlerFor(prom.Reg, promhttp.HandlerOpts{Registry: prom.Reg})),
+	)
+	go func() {
+		err := metricsEngine.Run(":9090")
+		if err != nil {
+			logger.Error("ERROR FROM METRICS ENGINE")
+		}
+	}()
 
 	err = engine.Run(":8080")
 	if err != nil {

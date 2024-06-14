@@ -8,5 +8,7 @@ RUN CGO_ENABLED=0 go build -o /bin/app
 FROM alpine:latest
 RUN apk --update add ca-certificates
 COPY --from=builder /bin/app /bin/app
+EXPOSE 8080
+EXPOSE 9090
 
 CMD [ "/bin/app" ]
